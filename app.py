@@ -425,8 +425,8 @@ class TranslatorApp(tk.Tk):
             data = resolve_data_folder(selected)
             self._suggest_output(data)
             if is_vnm_game(data):
-                self.from_var.set("Japon?s" if detect_vnm_language(data) == "ja" else "Ingl?s")
-                self._append_log("Visual Novel Maker: di?logos, escolhas e textos localiz?veis. Sa?da: c?pia de resources/app.")
+                self.from_var.set("Japonês" if detect_vnm_language(data) == "ja" else "Inglês")
+                self._append_log("Visual Novel Maker: diálogos, escolhas e textos localizáveis. Saída: cópia de resources/app.")
             elif (data / "index.html").is_file():
                 self.from_var.set("Japonês" if detect_web_language(data) == "ja" else "Inglês")
             elif (data / "srp.pac").is_file():
@@ -457,6 +457,11 @@ class TranslatorApp(tk.Tk):
     def _start(self) -> None:
         try:
             data = resolve_data_folder(self.game_var.get())
+            from_code = SOURCE_LANGUAGES[self.from_var.get()]
+            to_code = TARGET_LANGUAGES[self.to_var.get()]
+        except KeyError:
+            messagebox.showerror("Idioma inválido", "Selecione novamente os idiomas de origem e destino.")
+            return
         except Exception as exc:
             messagebox.showerror("Pasta inválida", str(exc))
             return
@@ -475,8 +480,6 @@ class TranslatorApp(tk.Tk):
         self._append_log(f"Saída: {output}")
         engine_id = self.settings["engine"]
         self._append_log(f"Modelo: {ENGINES[engine_id].name}")
-        from_code = SOURCE_LANGUAGES[self.from_var.get()]
-        to_code = TARGET_LANGUAGES[self.to_var.get()]
         threading.Thread(
             target=self._worker, args=(data, output, from_code, to_code, engine_id), daemon=True
         ).start()
