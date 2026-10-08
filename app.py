@@ -8,6 +8,10 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from web_game import detect_web_language
+from pac_game import detect_pac_language
+from vnm_game import is_vnm_game, detect_vnm_language
+from windows_locale import read_configuration, load_snapshot, enable_japanese, restore_previous
 
 from translator_core import (
     ENGINES,
@@ -58,10 +62,10 @@ TARGET_LANGUAGES = {
 class TranslatorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Tradutor RPG Maker MV")
-        self.minsize(680, 440)
+        self.title("Tradutor de Jogos — RPG Maker, HTML, VNM e PAC")
+        self.minsize(900, 500)
         height = min(560, self.winfo_screenheight() - 100)
-        width = min(820, self.winfo_screenwidth() - 40)
+        width = min(1060, self.winfo_screenwidth() - 40)
         self.geometry(f"{width}x{height}+{(self.winfo_screenwidth() - width) // 2}+{max((self.winfo_screenheight() - height) // 2 - 30, 0)}")
         self.configure(bg=COLORS["bg"])
         self.cancel_event = threading.Event()
@@ -77,9 +81,12 @@ class TranslatorApp(tk.Tk):
         self.percent_var = tk.StringVar(value="0%")
         self.progress_var = tk.DoubleVar(value=0)
         self.engine_var = tk.StringVar(value=ENGINES[self.settings["engine"]].name)
+        self.locale_var = tk.StringVar(value="Verificando configuração…")
+        self.locale_busy = False
 
         self._setup_style()
         self._build()
+        self._refresh_locale()
         self.after(100, self._poll_messages)
 
     def _setup_style(self) -> None:
@@ -236,6 +243,18 @@ class TranslatorApp(tk.Tk):
         return card
 
     def _build(self) -> None:
+        sidebar = ttk.Frame(self, style="Card.TFrame", padding=(14, 18), width=210)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        ttk.Label(sidebar, text="COMPATIBILIDADE", style="Section.TLabel").pack(anchor="w", pady=(0, 12))
+        ttk.Label(sidebar, text="Jogos japoneses antigos", style="Field.TLabel", wraplength=180).pack(anchor="w")
+        ttk.Label(sidebar, textvariable=self.locale_var, style="Field.TLabel", wraplength=180).pack(anchor="w", pady=(10, 12))
+        self.locale_enable_button = ttk.Button(sidebar, text="Ativar japonês", command=lambda: self._change_locale(True))
+        self.locale_enable_button.pack(fill="x", pady=(0, 8))
+        self.locale_restore_button = ttk.Button(sidebar, text="Restaurar anterior", command=lambda: self._change_locale(False))
+        self.locale_restore_button.pack(fill="x")
+        ttk.Label(sidebar, text="Altera o idioma de programas antigos em todo o Windows.\n\nExige administrador e reinicialização.\n\nRestaurar recupera a configuração salva antes da ativação.",
+                  style="Field.TLabel", wraplength=180, justify="left").pack(anchor="w", pady=(16, 0))
         outer = ttk.Frame(self, padding=(20, 14))
         outer.pack(fill="both", expand=True)
 
@@ -244,11 +263,11 @@ class TranslatorApp(tk.Tk):
         header.columnconfigure(0, weight=1)
         title_row = ttk.Frame(header)
         title_row.grid(row=0, column=0, sticky="w")
-        ttk.Label(title_row, text="Tradutor RPG Maker MV", style="Title.TLabel").pack(side="left")
+        ttk.Label(title_row, text="Tradutor de Jogos", style="Title.TLabel").pack(side="left")
         ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(4, 0))
         ttk.Label(
             header,
-            text="Traduz diálogos e textos dos arquivos JSON, preservando os comandos do RPG Maker.",
+            text="Traduz textos de jogos RPG Maker, HTML/JavaScript, Visual Novel Maker e PAC (DOSNESAN).",
             style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.settings_button = ttk.Button(header, text="⚙  Configurações", command=self._open_settings)
@@ -354,6 +373,39 @@ class TranslatorApp(tk.Tk):
 
         progress_card.bind("<Configure>", lambda event: self.status_label.configure(wraplength=max(event.width - 40, 200)))
 
+    def _refresh_locale(self) -> None:
+        try:
+            config = read_configuration()
+            snapshot = load_snapshot()
+            mode = "UTF-8" if config['code_pages']['ACP'] == '65001' else config['locale']
+            self.locale_var.set(f"Configurado: {mode}")
+            self.locale_enable_button.configure(state="disabled" if self.locale_busy else "normal")
+            self.locale_restore_button.configure(state="normal" if snapshot and snapshot['active'] and not self.locale_busy else "disabled")
+        except Exception as exc:
+            self.locale_var.set(str(exc))
+            self.locale_enable_button.configure(state="disabled")
+            self.locale_restore_button.configure(state="disabled")
+
+    def _change_locale(self, enable: bool) -> None:
+        if self.locale_busy:
+            return
+        action = "ativar japonês para programas antigos" if enable else "restaurar a configuração regional anterior"
+        if not messagebox.askyesno("Compatibilidade do Windows",
+                                  f"Deseja {action}?\n\nA mudança afeta programas antigos em todo o Windows e exige reinicialização. "
+                                  "Será solicitada permissão de administrador. Salve seu trabalho antes de reiniciar.", parent=self):
+            return
+        self.locale_busy = True
+        self._refresh_locale()
+        self.locale_var.set("Aguardando permissão do Windows…")
+
+        def worker():
+            try:
+                locale = enable_japanese() if enable else restore_previous()
+                self.messages.put(("locale_done", enable, locale))
+            except Exception as exc:
+                self.messages.put(("locale_error", str(exc)))
+        threading.Thread(target=worker, daemon=True).start()
+
     def _set_status(self, text: str, kind: str = "normal") -> None:
         self.status_var.set(text)
         color = {"success": COLORS["success"], "error": COLORS["danger"]}.get(kind, COLORS["text"])
@@ -365,19 +417,27 @@ class TranslatorApp(tk.Tk):
 
     def _suggest_output(self, data: Path) -> None:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.output_var.set(str(data.parent / f"data_pt_{stamp}"))
+        self.output_var.set(str(data.parent / f"{data.name}_pt_{stamp}"))
 
     def load_game(self, selected: str) -> None:
         self.game_var.set(selected)
         try:
             data = resolve_data_folder(selected)
             self._suggest_output(data)
+            if is_vnm_game(data):
+                self.from_var.set("Japon?s" if detect_vnm_language(data) == "ja" else "Ingl?s")
+                self._append_log("Visual Novel Maker: di?logos, escolhas e textos localiz?veis. Sa?da: c?pia de resources/app.")
+            elif (data / "index.html").is_file():
+                self.from_var.set("Japonês" if detect_web_language(data) == "ja" else "Inglês")
+            elif (data / "srp.pac").is_file():
+                self.from_var.set("Japonês" if detect_pac_language(data) == "ja" else "Inglês")
+                self._append_log("PAC: a saída contém srp.pac. Acentos serão convertidos para letras simples por compatibilidade.")
             self._set_status(f"Dados encontrados em: {data}", "success")
         except Exception as exc:
             self._set_status(str(exc), "error")
 
     def _choose_game(self) -> None:
-        selected = filedialog.askdirectory(title="Selecione a pasta do jogo RPG Maker MV")
+        selected = filedialog.askdirectory(title="Selecione a pasta do jogo")
         if selected:
             self.load_game(selected)
 
@@ -445,7 +505,19 @@ class TranslatorApp(tk.Tk):
             while True:
                 message = self.messages.get_nowait()
                 kind = message[0]
-                if kind == "progress":
+                if kind == "locale_done":
+                    self.locale_busy = False
+                    self._refresh_locale()
+                    action = "Japonês ativado" if message[1] else f"Configuração {message[2]} restaurada"
+                    self.locale_var.set(f"{action}.\nReinicie o Windows.")
+                    self._append_log(f"{action}. Reinicialização do Windows necessária.")
+                    messagebox.showinfo("Reinicialização necessária", f"{action}.\n\nSalve seu trabalho e reinicie o Windows para concluir. Depois abra o jogo novamente.", parent=self)
+                elif kind == "locale_error":
+                    self.locale_busy = False
+                    self._refresh_locale()
+                    self._append_log(message[1], "error")
+                    messagebox.showerror("Configuração regional", message[1], parent=self)
+                elif kind == "progress":
                     _, done, total, status = message
                     self._set_progress((done / max(total, 1)) * 100)
                     self._set_status(status)
@@ -531,7 +603,7 @@ class TranslatorApp(tk.Tk):
             return
         if not messagebox.askyesno(
             "Aplicar tradução",
-            "Isso substituirá os JSON do jogo após criar um backup completo. Continuar?",
+            "Isso substituirá os arquivos do jogo após criar um backup completo. Continuar?",
         ):
             return
         try:

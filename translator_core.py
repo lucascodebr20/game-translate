@@ -16,6 +16,9 @@ import argostranslate.package
 import argostranslate.translate
 import ctranslate2
 import sentencepiece
+from web_game import collect_source_strings, render_source
+from pac_game import PacArchive, load_pac
+from vnm_game import VnmDocument, is_vnm_game
 from argostranslate import settings as argos_settings
 
 
@@ -45,7 +48,7 @@ DATABASE_FILES = {
 
 EVENT_FILES = {"CommonEvents.json", "Troops.json"}
 CONTROL_CODE = re.compile(
-    r"(?:(?:%[0-9]+|\\[A-Za-z]+(?:\[[^\]]*\])?|\\[{}.$|!><^]|\\\\|\x1b[A-Za-z]+(?:\[[^\]]*\])?))+"
+    r"(?:(?:\{[^{}]*\}|〔[^〕]*〕|%[0-9]+|\\[A-Za-z]+(?:\[[^\]]*\])?|\\[{}.$|!><^]|\\\\|\x1b[A-Za-z]+(?:\[[^\]]*\])?))+"
 )
 JAPANESE_CHARACTER = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]")
 INNER_SENTENCE_BREAK = re.compile(r"[.!?。！？…‼⁉]+[\"'”’」』)\]）]*\s*\w")
@@ -224,13 +227,21 @@ def _wrap_lines(text: str, count: int) -> list[str]:
 
 def resolve_data_folder(selected: str | Path) -> Path:
     path = Path(selected).expanduser().resolve()
+    if (path / "srp.pac").is_file():
+        return path
+    for candidate in (path, path / "resources" / "app", path / "app", path.parent):
+        if is_vnm_game(candidate):
+            return candidate
     candidates = (path, path / "www" / "data", path / "data")
     for candidate in candidates:
         if (candidate / "System.json").is_file() and any(candidate.glob("Map*.json")):
             return candidate
+    for candidate in (path, path / "www"):
+        if (candidate / "index.html").is_file() and (candidate / "js").is_dir():
+            return candidate
     raise ValueError(
-        "Pasta de dados do RPG Maker MV não encontrada. Selecione a pasta do jogo, "
-        "a pasta 'www' ou a pasta 'www/data'."
+        "Jogo não encontrado. Selecione a pasta do jogo, 'www' ou 'www/data'. "
+        "Formatos aceitos: RPG Maker MV, HTML/JavaScript e PAC de cenários (srp.pac)."
     )
 
 
@@ -731,15 +742,33 @@ def translate_game(
 
     documents: list[tuple[Path, object, list[TextReference | MessageGroup]]] = []
     unique_texts: dict[str, None] = {}
-    for path in iter_json_files(data_folder):
-        with path.open("r", encoding="utf-8-sig") as handle:
-            data = json.load(handle)
-        refs = collect_references(path.name, data, from_code)
+    vnm_game = is_vnm_game(data_folder)
+    web_game = (data_folder / "index.html").is_file() and not vnm_game
+    pac_game = (data_folder / "srp.pac").is_file()
+    paths = (sorted((data_folder / "data").glob("*.json.js")) if vnm_game else
+             sorted(data_folder.rglob("*.js")) + sorted(data_folder.rglob("*.html"))
+             if web_game else [data_folder / "srp.pac"] if pac_game else iter_json_files(data_folder))
+    for path in paths:
+        if is_cancelled and is_cancelled():
+            raise TranslationCancelled()
+        if vnm_game:
+            data = VnmDocument(path.read_bytes(), path.name[:-8])
+            refs = data.refs
+        elif pac_game:
+            data = load_pac(data_folder)
+            refs = data.refs
+        else:
+            with path.open("r", encoding="utf-8-sig") as handle:
+                data = handle.read() if web_game else json.load(handle)
+            refs = (collect_source_strings(data, "js" if path.suffix == ".js" else "html", from_code)
+                    if web_game else collect_references(path.name, data, from_code))
         documents.append((path, data, refs))
         for ref in refs:
             unique_texts.setdefault(ref.text, None)
 
     paragraphs = _collect_bodies(unique_texts, from_code)
+    if not paragraphs:
+        raise ValueError("Nenhum texto traduzível encontrado. Confira o idioma de origem selecionado.")
     translations = _load_cache(cache_path, engine.id, from_code, to_code, paragraphs) if cache_path else {}
     missing = [paragraph for paragraph in paragraphs if paragraph not in translations]
     if progress and translations:
@@ -771,6 +800,21 @@ def translate_game(
         for text in unique_texts
     }
 
+    # Validate and encode the whole PAC before creating the output directory.
+    if pac_game:
+        for _source, archive, refs in documents:
+            for ref in refs:
+                ref.set(final[ref.text])
+            rendered = archive.render()
+            PacArchive(rendered)
+        if is_cancelled and is_cancelled():
+            raise TranslationCancelled()
+        output.mkdir(parents=True)
+        (output / "srp.pac").write_bytes(rendered)
+        return output, len(final), 1
+
+    if is_cancelled and is_cancelled():
+        raise TranslationCancelled()
     shutil.copytree(data_folder, output)
     changed_files = 0
     for source, data, refs in documents:
@@ -778,8 +822,17 @@ def translate_game(
             continue
         for ref in refs:
             ref.set(final[ref.text])
-        with (output / source.name).open("w", encoding="utf-8", newline="") as handle:
-            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+        if vnm_game:
+            rendered = data.render()
+            VnmDocument(rendered, data.uid)
+            (output / source.relative_to(data_folder)).write_bytes(rendered)
+            changed_files += 1
+            continue
+        with (output / source.relative_to(data_folder)).open("w", encoding="utf-8", newline="") as handle:
+            if web_game:
+                handle.write(render_source(data, refs))
+            else:
+                json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
         changed_files += 1
     return output, len(final), changed_files
 
@@ -789,8 +842,31 @@ def apply_translation(original_data: str | Path, translated_data: str | Path) ->
     translated = Path(translated_data).expanduser().resolve()
     if not translated.is_dir():
         raise ValueError("Pasta traduzida não encontrada.")
+    if is_vnm_game(original):
+        if translated == original or original in translated.parents or translated in original.parents:
+            raise ValueError("Selecione uma pasta traduzida separada do jogo original.")
+        for path in (original / 'data').glob('*.json.js'):
+            VnmDocument((translated / 'data' / path.name).read_bytes(), path.name[:-8])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = original.parent / f"data_backup_{timestamp}"
+    backup = original.parent / f"{original.name}_backup_{timestamp}"
+    if (original / "srp.pac").is_file():
+        archive_path = translated / "srp.pac"
+        if archive_path.resolve() == (original / "srp.pac").resolve():
+            raise ValueError("Selecione uma pasta traduzida separada do jogo original.")
+        PacArchive(archive_path.read_bytes())
+        backup.mkdir()
+        shutil.copy2(original / "srp.pac", backup / "srp.pac")
+        temporary = original / "srp.pac.translation.tmp"
+        created = False
+        try:
+            with temporary.open("xb") as handle:
+                created = True
+                handle.write(archive_path.read_bytes())
+            temporary.replace(original / "srp.pac")
+        finally:
+            if created:
+                temporary.unlink(missing_ok=True)
+        return backup
     shutil.copytree(original, backup)
     shutil.copytree(translated, original, dirs_exist_ok=True)
     return backup
