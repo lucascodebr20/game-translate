@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import sqlite3
+import urllib.request
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,7 @@ from typing import Callable, Iterable
 import argostranslate.package
 import argostranslate.translate
 import ctranslate2
+import sentencepiece
 from argostranslate import settings as argos_settings
 
 
@@ -52,9 +54,106 @@ JAPANESE_LINE_END = "。！？!?…」』）)】♪～"
 JAPANESE_LINE_START = "「『【（("
 NO_SPACE_LANGUAGES = {"ja", "zh"}
 
-CACHE_FILE = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "TradutorRPGMaker" / "translation_cache.sqlite3"
+SENTENCE = re.compile(r".*?(?:[.!?。！？…‼⁉]+[\"'”’」』)\]）]*(?=\s|$)|[。！？]+[」』）)]*|$)\s*", re.S)
+
+APP_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "TradutorRPGMaker"
+CACHE_FILE = APP_DIR / "translation_cache.sqlite3"
+SETTINGS_FILE = APP_DIR / "settings.json"
+MODELS_DIR = APP_DIR / "models"
 SENTENCES_PER_CALL = 512
 MAX_BATCH_TOKENS = 256
+
+
+HUGGING_FACE = "https://huggingface.co/{repo}/resolve/{revision}/{name}"
+NLLB_TOKENIZER = HUGGING_FACE.format(
+    repo="facebook/nllb-200-distilled-600M",
+    revision="f8d333a098d19b4fd9a8b18f94170487ad3f821d",
+    name="sentencepiece.bpe.model",
+)
+NLLB_CODES = {
+    "de": "deu_Latn",
+    "en": "eng_Latn",
+    "es": "spa_Latn",
+    "fr": "fra_Latn",
+    "ja": "jpn_Jpan",
+    "pt": "por_Latn",
+}
+
+
+@dataclass(frozen=True)
+class EngineInfo:
+    id: str
+    name: str
+    description: str
+    size: str
+    files: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def folder(self) -> Path:
+        return MODELS_DIR / self.id
+
+    def is_installed(self) -> bool:
+        return all((self.folder / name).is_file() for name, _url in self.files)
+
+
+def _hugging_face_files(repo: str, revision: str, *names: str) -> tuple[tuple[str, str], ...]:
+    return tuple((name, HUGGING_FACE.format(repo=repo, revision=revision, name=name)) for name in names)
+
+
+DEFAULT_ENGINE = "argos"
+ENGINES = {
+    "argos": EngineInfo(
+        "argos",
+        "Argos Translate",
+        "O mais rápido. Bom para inglês; fraco para japonês, que passa pelo inglês.",
+        "~100 MB por idioma",
+    ),
+    "nllb-600m": EngineInfo(
+        "nllb-600m",
+        "NLLB-200 600M (Meta)",
+        "Traduz japonês direto, sem passar pelo inglês. De 4 a 7× mais lento que o Argos. "
+        "Licença CC-BY-NC: somente uso não comercial.",
+        "620 MB",
+        _hugging_face_files(
+            "JustFrederik/nllb-200-distilled-600M-ct2-int8",
+            "302d78f00e6fdb50a1064059df7c392b735e9d05",
+            "config.json",
+            "model.bin",
+            "shared_vocabulary.txt",
+        )
+        + (("sentencepiece.bpe.model", NLLB_TOKENIZER),),
+    ),
+    "nllb-1.3b": EngineInfo(
+        "nllb-1.3b",
+        "NLLB-200 1.3B (Meta)",
+        "A melhor qualidade, principalmente em japonês. De 7 a 13× mais lento que o Argos. "
+        "Licença CC-BY-NC: somente uso não comercial.",
+        "1,4 GB",
+        _hugging_face_files(
+            "OpenNMT/nllb-200-distilled-1.3B-ct2-int8",
+            "70f572adafa4794890ce7826156a4209717855af",
+            "config.json",
+            "model.bin",
+            "shared_vocabulary.json",
+        )
+        + (("sentencepiece.bpe.model", NLLB_TOKENIZER),),
+    ),
+}
+
+
+def load_settings() -> dict:
+    try:
+        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settings = {}
+    if settings.get("engine") not in ENGINES:
+        settings["engine"] = DEFAULT_ENGINE
+    return settings
+
+
+def save_settings(settings: dict) -> None:
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _has_letter(value: str) -> bool:
@@ -142,6 +241,35 @@ def _find_installed_translation(from_code: str, to_code: str):
     if source is None or target is None:
         return None
     return source.get_translation(target)
+
+
+def ensure_engine_files(
+    engine: EngineInfo,
+    progress: ProgressCallback | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+) -> None:
+    engine.folder.mkdir(parents=True, exist_ok=True)
+    for name, url in engine.files:
+        target = engine.folder / name
+        if target.is_file():
+            continue
+        partial = target.with_name(target.name + ".part")
+        try:
+            with urllib.request.urlopen(url) as response, partial.open("wb") as handle:
+                total = int(response.headers.get("Content-Length") or 0)
+                done = 0
+                while chunk := response.read(1 << 20):
+                    if is_cancelled and is_cancelled():
+                        raise TranslationCancelled()
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        size = max(total, done)
+                        progress(done, size, f"Baixando {engine.name} ({name}): {done >> 20} de {size >> 20} MB")
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+        partial.replace(target)
 
 
 def _ensure_direct_model(from_code: str, to_code: str) -> None:
@@ -391,22 +519,39 @@ def _get_package_translations(from_code: str, to_code: str) -> list:
 _ctranslate_models: dict[tuple[str, int, int], ctranslate2.Translator] = {}
 
 
+def _load_ctranslate_model(folder: Path, inter_threads: int, intra_threads: int) -> ctranslate2.Translator:
+    key = (str(folder), inter_threads, intra_threads)
+    if key not in _ctranslate_models:
+        _ctranslate_models[key] = ctranslate2.Translator(
+            str(folder),
+            device=argos_settings.device,
+            inter_threads=inter_threads,
+            intra_threads=intra_threads,
+            compute_type=argos_settings.compute_type,
+        )
+    return _ctranslate_models[key]
+
+
+def _translate_batch(translator: ctranslate2.Translator, tokenized: list[list[str]], target_prefix=None) -> list:
+    return translator.translate_batch(
+        tokenized,
+        target_prefix=target_prefix,
+        replace_unknowns=True,
+        max_batch_size=MAX_BATCH_TOKENS,
+        batch_type="tokens",
+        beam_size=max(1, argos_settings.beam_size),
+        num_hypotheses=1,
+        length_penalty=0.2,
+    )
+
+
 class BatchModel:
     """Translates many paragraphs with one Argos model, sending sentences in batches."""
 
     def __init__(self, package_translation, inter_threads: int, intra_threads: int) -> None:
         self.pkg = package_translation.pkg
         self.sentencizer = package_translation.sentencizer
-        key = (str(self.pkg.package_path), inter_threads, intra_threads)
-        if key not in _ctranslate_models:
-            _ctranslate_models[key] = ctranslate2.Translator(
-                str(self.pkg.package_path / "model"),
-                device=argos_settings.device,
-                inter_threads=inter_threads,
-                intra_threads=intra_threads,
-                compute_type=argos_settings.compute_type,
-            )
-        self.translator = _ctranslate_models[key]
+        self.translator = _load_ctranslate_model(self.pkg.package_path / "model", inter_threads, intra_threads)
 
     def split_sentences(self, paragraph: str) -> list[str]:
         if not paragraph.strip():
@@ -418,15 +563,8 @@ class BatchModel:
     def translate_sentences(self, sentences: list[str]) -> list[list[str]]:
         tokenized = [self.pkg.tokenizer.encode(sentence) for sentence in sentences]
         prefix = self.pkg.target_prefix
-        results = self.translator.translate_batch(
-            tokenized,
-            target_prefix=[[prefix]] * len(tokenized) if prefix else None,
-            replace_unknowns=True,
-            max_batch_size=MAX_BATCH_TOKENS,
-            batch_type="tokens",
-            beam_size=max(1, argos_settings.beam_size),
-            num_hypotheses=1,
-            length_penalty=0.2,
+        results = _translate_batch(
+            self.translator, tokenized, [[prefix]] * len(tokenized) if prefix else None
         )
         hypotheses = [result.hypotheses[0] for result in results]
         if prefix:
@@ -467,37 +605,92 @@ class BatchModel:
         ]
 
 
+class NllbModel(BatchModel):
+    """Translates directly between any two languages with an NLLB-200 model."""
+
+    def __init__(
+        self, engine: EngineInfo, from_code: str, to_code: str, inter_threads: int, intra_threads: int
+    ) -> None:
+        self.tokenizer = sentencepiece.SentencePieceProcessor(
+            model_file=str(engine.folder / "sentencepiece.bpe.model")
+        )
+        self.source_language = NLLB_CODES[from_code]
+        self.target_language = NLLB_CODES[to_code]
+        self.translator = _load_ctranslate_model(engine.folder, inter_threads, intra_threads)
+
+    def split_sentences(self, paragraph: str) -> list[str]:
+        return [sentence.strip() for sentence in SENTENCE.findall(paragraph) if sentence.strip()]
+
+    def translate_sentences(self, sentences: list[str]) -> list[list[str]]:
+        tokenized = [
+            [self.source_language] + self.tokenizer.encode(sentence, out_type=str) + ["</s>"]
+            for sentence in sentences
+        ]
+        results = _translate_batch(self.translator, tokenized, [[self.target_language]] * len(tokenized))
+        return [result.hypotheses[0][1:] for result in results]
+
+    def decode(self, tokens: list[str]) -> str:
+        return self.tokenizer.decode(tokens) if tokens else ""
+
+
+def _create_models(
+    engine: EngineInfo, from_code: str, to_code: str, inter_threads: int, intra_threads: int
+) -> list[BatchModel]:
+    if from_code == to_code:
+        return []
+    if engine.id == "argos":
+        return [
+            BatchModel(translation, inter_threads, intra_threads)
+            for translation in _get_package_translations(from_code, to_code)
+        ]
+    return [NllbModel(engine, from_code, to_code, inter_threads, intra_threads)]
+
+
 _CACHE_SCHEMA = (
-    "CREATE TABLE IF NOT EXISTS translations ("
-    "from_code TEXT NOT NULL, to_code TEXT NOT NULL, source TEXT NOT NULL, "
-    "translated TEXT NOT NULL, PRIMARY KEY (from_code, to_code, source))"
+    "CREATE TABLE IF NOT EXISTS engine_translations ("
+    "engine TEXT NOT NULL, from_code TEXT NOT NULL, to_code TEXT NOT NULL, source TEXT NOT NULL, "
+    "translated TEXT NOT NULL, PRIMARY KEY (engine, from_code, to_code, source))"
 )
 
 
-def _load_cache(path: Path, from_code: str, to_code: str, texts: Iterable[str]) -> dict[str, str]:
+def _open_cache(path: Path) -> sqlite3.Connection:
+    db = sqlite3.connect(path)
+    db.execute(_CACHE_SCHEMA)
+    legacy = db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'translations'").fetchone()
+    if legacy:
+        with db:
+            db.execute("INSERT OR IGNORE INTO engine_translations SELECT 'argos', * FROM translations")
+            db.execute("DROP TABLE translations")
+    return db
+
+
+def _load_cache(
+    path: Path, engine: str, from_code: str, to_code: str, texts: Iterable[str]
+) -> dict[str, str]:
     if not path.is_file():
         return {}
     wanted = set(texts)
     try:
-        with closing(sqlite3.connect(path)) as db:
-            db.execute(_CACHE_SCHEMA)
+        with closing(_open_cache(path)) as db:
             rows = db.execute(
-                "SELECT source, translated FROM translations WHERE from_code = ? AND to_code = ?",
-                (from_code, to_code),
+                "SELECT source, translated FROM engine_translations "
+                "WHERE engine = ? AND from_code = ? AND to_code = ?",
+                (engine, from_code, to_code),
             )
             return {source: translated for source, translated in rows if source in wanted}
     except sqlite3.Error:
         return {}
 
 
-def _save_cache(path: Path, from_code: str, to_code: str, translations: dict[str, str]) -> None:
+def _save_cache(
+    path: Path, engine: str, from_code: str, to_code: str, translations: dict[str, str]
+) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute(_CACHE_SCHEMA)
+        with closing(_open_cache(path)) as db, db:
             db.executemany(
-                "INSERT OR REPLACE INTO translations VALUES (?, ?, ?, ?)",
-                [(from_code, to_code, source, value) for source, value in translations.items()],
+                "INSERT OR REPLACE INTO engine_translations VALUES (?, ?, ?, ?, ?)",
+                [(engine, from_code, to_code, source, value) for source, value in translations.items()],
             )
     except (OSError, sqlite3.Error):
         pass
@@ -519,6 +712,7 @@ def translate_game(
     is_cancelled: Callable[[], bool] | None = None,
     workers: int | None = None,
     cache_path: Path | None = CACHE_FILE,
+    engine_id: str = DEFAULT_ENGINE,
 ) -> tuple[Path, int, int]:
     data_folder = resolve_data_folder(selected_folder)
     output = Path(output_folder).expanduser().resolve()
@@ -527,9 +721,13 @@ def translate_game(
     if data_folder == output or data_folder in output.parents:
         raise ValueError("A saída não pode ficar dentro da pasta Data original.")
 
+    engine = ENGINES[engine_id]
     if progress:
-        progress(0, 1, "Preparando o modelo de tradução…")
-    ensure_translation_model(from_code, to_code)
+        progress(0, 1, f"Preparando o modelo {engine.name}…")
+    if engine.id == "argos":
+        ensure_translation_model(from_code, to_code)
+    else:
+        ensure_engine_files(engine, progress, is_cancelled)
 
     documents: list[tuple[Path, object, list[TextReference | MessageGroup]]] = []
     unique_texts: dict[str, None] = {}
@@ -542,7 +740,7 @@ def translate_game(
             unique_texts.setdefault(ref.text, None)
 
     paragraphs = _collect_bodies(unique_texts, from_code)
-    translations = _load_cache(cache_path, from_code, to_code, paragraphs) if cache_path else {}
+    translations = _load_cache(cache_path, engine.id, from_code, to_code, paragraphs) if cache_path else {}
     missing = [paragraph for paragraph in paragraphs if paragraph not in translations]
     if progress and translations:
         progress(0, 1, f"{len(translations)} de {len(paragraphs)} trechos recuperados do cache.")
@@ -551,10 +749,7 @@ def translate_game(
         cpu_count = os.cpu_count() or 2
         inter_threads = max(1, min(workers or min(4, cpu_count // 4), 8))
         intra_threads = max(1, cpu_count // inter_threads)
-        models = [
-            BatchModel(translation, inter_threads, intra_threads)
-            for translation in _get_package_translations(from_code, to_code)
-        ]
+        models = _create_models(engine, from_code, to_code, inter_threads, intra_threads)
         results = missing
         for number, model in enumerate(models, 1):
             stage = f"Etapa {number} de {len(models)} — " if len(models) > 1 else ""
@@ -569,7 +764,7 @@ def translate_game(
         new_translations = dict(zip(missing, results))
         translations.update(new_translations)
         if cache_path:
-            _save_cache(cache_path, from_code, to_code, new_translations)
+            _save_cache(cache_path, engine.id, from_code, to_code, new_translations)
 
     final = {
         text: _map_segments(text, from_code, lambda body: translations.get(body, body))

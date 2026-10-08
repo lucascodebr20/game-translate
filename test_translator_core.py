@@ -1,5 +1,6 @@
 import json
 import re
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,12 +9,18 @@ from unittest import mock
 
 import translator_core
 from translator_core import (
+    ENGINES,
     BatchModel,
+    EngineInfo,
     MessageGroup,
+    NllbModel,
     _load_cache,
     _save_cache,
     _wrap_lines,
     collect_references,
+    ensure_engine_files,
+    load_settings,
+    save_settings,
     translate_game,
     translate_text,
 )
@@ -151,13 +158,84 @@ class BatchModelTests(unittest.TestCase):
 
 
 class CacheTests(unittest.TestCase):
-    def test_round_trip_by_language_pair(self) -> None:
+    def test_round_trip_by_engine_and_language_pair(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "cache.sqlite3"
-            _save_cache(path, "en", "pt", {"Hello": "Olá"})
+            _save_cache(path, "argos", "en", "pt", {"Hello": "Olá"})
 
-            self.assertEqual(_load_cache(path, "en", "pt", ["Hello", "Bye"]), {"Hello": "Olá"})
-            self.assertEqual(_load_cache(path, "en", "es", ["Hello"]), {})
+            self.assertEqual(_load_cache(path, "argos", "en", "pt", ["Hello", "Bye"]), {"Hello": "Olá"})
+            self.assertEqual(_load_cache(path, "argos", "en", "es", ["Hello"]), {})
+            self.assertEqual(_load_cache(path, "nllb-600m", "en", "pt", ["Hello"]), {})
+
+    def test_migrates_cache_without_engine_to_argos(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cache.sqlite3"
+            db = sqlite3.connect(path)
+            db.execute(
+                "CREATE TABLE translations (from_code TEXT, to_code TEXT, source TEXT, translated TEXT, "
+                "PRIMARY KEY (from_code, to_code, source))"
+            )
+            db.execute("INSERT INTO translations VALUES ('en', 'pt', 'Hello', 'Olá')")
+            db.commit()
+            db.close()
+
+            self.assertEqual(_load_cache(path, "argos", "en", "pt", ["Hello"]), {"Hello": "Olá"})
+
+
+class SettingsTests(unittest.TestCase):
+    def test_saves_engine_and_falls_back_to_default(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "settings.json"
+            with mock.patch.object(translator_core, "SETTINGS_FILE", path):
+                self.assertEqual(load_settings()["engine"], "argos")
+                save_settings({"engine": "nllb-1.3b"})
+                self.assertEqual(load_settings()["engine"], "nllb-1.3b")
+                path.write_text('{"engine": "removido"}', encoding="utf-8")
+                self.assertEqual(load_settings()["engine"], "argos")
+
+
+class EngineDownloadTests(unittest.TestCase):
+    def test_downloads_missing_files_only(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.bin"
+            source.write_bytes(b"x" * 1000)
+            engine = EngineInfo("teste", "Teste", "", "1 KB", (("model.bin", source.as_uri()),))
+            messages: list[str] = []
+
+            with mock.patch.object(translator_core, "MODELS_DIR", Path(folder) / "models"):
+                self.assertFalse(engine.is_installed())
+                ensure_engine_files(engine, lambda done, total, message: messages.append(message))
+                self.assertTrue(engine.is_installed())
+                self.assertEqual((engine.folder / "model.bin").read_bytes(), b"x" * 1000)
+                source.unlink()
+                ensure_engine_files(engine)
+
+            self.assertTrue(messages)
+
+    def test_cancelled_download_leaves_no_partial_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.bin"
+            source.write_bytes(b"x" * 1000)
+            engine = EngineInfo("teste", "Teste", "", "1 KB", (("model.bin", source.as_uri()),))
+
+            with mock.patch.object(translator_core, "MODELS_DIR", Path(folder) / "models"):
+                with self.assertRaises(translator_core.TranslationCancelled):
+                    ensure_engine_files(engine, is_cancelled=lambda: True)
+                self.assertEqual(list(engine.folder.iterdir()), [])
+
+
+class SentenceSplitTests(unittest.TestCase):
+    def test_splits_latin_and_japanese_sentences(self) -> None:
+        model = NllbModel.__new__(NllbModel)
+
+        self.assertEqual(
+            model.split_sentences("Damn it... I can't! She said \"Go.\" Fine"),
+            ["Damn it...", "I can't!", 'She said "Go."', "Fine"],
+        )
+        self.assertEqual(
+            model.split_sentences("おい、お前！やっと目が覚めたか。「元気？」"),
+            ["おい、お前！", "やっと目が覚めたか。", "「元気？」"],
+        )
 
 
 class TranslateGameTests(unittest.TestCase):
@@ -178,9 +256,7 @@ class TranslateGameTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(
             translator_core, "ensure_translation_model"
-        ), mock.patch.object(translator_core, "_get_package_translations", return_value=[None]), mock.patch.object(
-            translator_core, "BatchModel", side_effect=create_model
-        ):
+        ), mock.patch.object(translator_core, "_create_models", side_effect=lambda *_args: [create_model()]):
             root = Path(folder)
             self._create_game(root)
             cache = root / "cache.sqlite3"
@@ -222,6 +298,20 @@ class RealModelTests(unittest.TestCase):
         batched = model.translate(texts, lambda done, total: None)
 
         self.assertEqual(batched, [argostranslate.translate.translate(text, "en", "pt") for text in texts])
+
+
+@unittest.skipUnless(ENGINES["nllb-600m"].is_installed(), "modelo NLLB-200 600M não baixado")
+class NllbModelTests(unittest.TestCase):
+    def test_translates_every_sentence_of_a_line(self) -> None:
+        model = NllbModel(ENGINES["nllb-600m"], "en", "pt", 2, 2)
+
+        result = model.translate(
+            ["Iron Sword", "My son went missing three days ago. Please, find him!"], lambda done, total: None
+        )
+
+        self.assertEqual(result[0], "Espada de Ferro")
+        self.assertIn("três dias", result[1])
+        self.assertIn("encontr", result[1].lower())
 
 
 if __name__ == "__main__":

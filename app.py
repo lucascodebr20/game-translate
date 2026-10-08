@@ -9,7 +9,15 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from translator_core import TranslationCancelled, apply_translation, resolve_data_folder, translate_game
+from translator_core import (
+    ENGINES,
+    TranslationCancelled,
+    apply_translation,
+    load_settings,
+    resolve_data_folder,
+    save_settings,
+    translate_game,
+)
 
 
 COLORS = {
@@ -59,6 +67,7 @@ class TranslatorApp(tk.Tk):
         self.cancel_event = threading.Event()
         self.messages: queue.Queue[tuple] = queue.Queue()
         self.last_output: Path | None = None
+        self.settings = load_settings()
 
         self.game_var = tk.StringVar()
         self.output_var = tk.StringVar()
@@ -67,6 +76,7 @@ class TranslatorApp(tk.Tk):
         self.status_var = tk.StringVar(value="Selecione a pasta do jogo para começar.")
         self.percent_var = tk.StringVar(value="0%")
         self.progress_var = tk.DoubleVar(value=0)
+        self.engine_var = tk.StringVar(value=ENGINES[self.settings["engine"]].name)
 
         self._setup_style()
         self._build()
@@ -179,6 +189,24 @@ class TranslatorApp(tk.Tk):
         )
 
         style.configure(
+            "Card.TRadiobutton",
+            background=c["card"],
+            foreground=c["text"],
+            font=(FONT, 10, "bold"),
+            indicatorbackground=c["input"],
+            indicatorforeground=c["accent"],
+            indicatorrelief="flat",
+            focuscolor=c["card"],
+            padding=(0, 2),
+        )
+        style.map(
+            "Card.TRadiobutton",
+            background=[("active", c["card"])],
+            indicatorbackground=[("selected", c["accent"]), ("active", c["button_hover"])],
+        )
+        style.configure("Hint.TLabel", background=c["card"], foreground=c["muted"], font=(FONT, 9))
+
+        style.configure(
             "Accent.Horizontal.TProgressbar",
             troughcolor=c["input"],
             background=c["accent"],
@@ -213,15 +241,18 @@ class TranslatorApp(tk.Tk):
 
         header = ttk.Frame(outer)
         header.pack(fill="x", pady=(0, 12))
+        header.columnconfigure(0, weight=1)
         title_row = ttk.Frame(header)
-        title_row.pack(anchor="w")
+        title_row.grid(row=0, column=0, sticky="w")
         ttk.Label(title_row, text="Tradutor RPG Maker MV", style="Title.TLabel").pack(side="left")
         ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(4, 0))
         ttk.Label(
             header,
             text="Traduz diálogos e textos dos arquivos JSON, preservando os comandos do RPG Maker.",
             style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(2, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self.settings_button = ttk.Button(header, text="⚙  Configurações", command=self._open_settings)
+        self.settings_button.grid(row=0, column=1, rowspan=2, sticky="e")
 
         folders = self._card(outer, "Configuração")
         form = ttk.Frame(folders, style="Card.TFrame")
@@ -256,6 +287,11 @@ class TranslatorApp(tk.Tk):
             width=14,
             state="readonly",
         ).pack(side="left", padx=10)
+
+        ttk.Label(form, text="Modelo", style="Field.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 14), pady=3)
+        ttk.Label(form, textvariable=self.engine_var, style="Field.TLabel").grid(
+            row=3, column=1, columnspan=2, sticky="w", pady=3
+        )
 
         buttons = ttk.Frame(outer)
         buttons.pack(side="bottom", fill="x", pady=(10, 0))
@@ -369,6 +405,7 @@ class TranslatorApp(tk.Tk):
             self._suggest_output(data)
             output = self.output_var.get()
         self.cancel_event.clear()
+        self.settings_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         self.apply_button.configure(state="disabled")
@@ -376,11 +413,15 @@ class TranslatorApp(tk.Tk):
         self._set_status("Iniciando tradução…")
         self._append_log(f"Origem: {data}")
         self._append_log(f"Saída: {output}")
+        engine_id = self.settings["engine"]
+        self._append_log(f"Modelo: {ENGINES[engine_id].name}")
         from_code = SOURCE_LANGUAGES[self.from_var.get()]
         to_code = TARGET_LANGUAGES[self.to_var.get()]
-        threading.Thread(target=self._worker, args=(data, output, from_code, to_code), daemon=True).start()
+        threading.Thread(
+            target=self._worker, args=(data, output, from_code, to_code, engine_id), daemon=True
+        ).start()
 
-    def _worker(self, data: Path, output: str, from_code: str, to_code: str) -> None:
+    def _worker(self, data: Path, output: str, from_code: str, to_code: str, engine_id: str) -> None:
         def progress(done: int, total: int, status: str) -> None:
             self.messages.put(("progress", done, total, status))
         try:
@@ -391,6 +432,7 @@ class TranslatorApp(tk.Tk):
                 to_code,
                 progress,
                 self.cancel_event.is_set,
+                engine_id=engine_id,
             )
             self.messages.put(("done", *result))
         except TranslationCancelled:
@@ -430,9 +472,59 @@ class TranslatorApp(tk.Tk):
         self.after(100, self._poll_messages)
 
     def _finish_controls(self, can_apply: bool = False) -> None:
+        self.settings_button.configure(state="normal")
         self.start_button.configure(state="normal")
         self.cancel_button.configure(state="disabled")
         self.apply_button.configure(state="normal" if can_apply else "disabled")
+
+    def _open_settings(self) -> None:
+        dialog = tk.Toplevel(self)
+        dialog.title("Configurações")
+        dialog.configure(bg=COLORS["bg"])
+        dialog.resizable(False, False)
+        dialog.transient(self)
+
+        outer = ttk.Frame(dialog, padding=(20, 16))
+        outer.pack(fill="both", expand=True)
+        card = self._card(outer, "Modelo de tradução")
+        selected = tk.StringVar(value=self.settings["engine"])
+        for engine in ENGINES.values():
+            ttk.Radiobutton(
+                card, text=engine.name, value=engine.id, variable=selected, style="Card.TRadiobutton"
+            ).pack(anchor="w", pady=(6, 0))
+            ttk.Label(card, text=engine.description, style="Hint.TLabel", wraplength=440, justify="left").pack(
+                anchor="w", padx=(24, 0)
+            )
+            if not engine.files:
+                status = f"Baixa cada idioma na primeira tradução ({engine.size})."
+            elif engine.is_installed():
+                status = f"Baixado ({engine.size})."
+            else:
+                status = f"Será baixado na primeira tradução ({engine.size})."
+            ttk.Label(card, text=status, style="Hint.TLabel").pack(anchor="w", padx=(24, 0))
+
+        def save() -> None:
+            self.settings["engine"] = selected.get()
+            try:
+                save_settings(self.settings)
+            except OSError as exc:
+                messagebox.showerror("Erro ao salvar", str(exc), parent=dialog)
+                return
+            self.engine_var.set(ENGINES[selected.get()].name)
+            self._append_log(f"Modelo selecionado: {ENGINES[selected.get()].name}")
+            dialog.destroy()
+
+        buttons = ttk.Frame(outer)
+        buttons.pack(fill="x", pady=(4, 0))
+        ttk.Button(buttons, text="Salvar", style="Accent.TButton", command=save).pack(side="right")
+        ttk.Button(buttons, text="Cancelar", command=dialog.destroy).pack(side="right", padx=10)
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_rooty() + max((self.winfo_height() - dialog.winfo_height()) // 2, 0)
+        dialog.geometry(f"+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_set()
 
     def _apply(self) -> None:
         if not self.last_output:
