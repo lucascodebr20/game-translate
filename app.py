@@ -51,8 +51,10 @@ class TranslatorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Tradutor RPG Maker MV")
-        self.geometry("860x720")
-        self.minsize(720, 580)
+        self.minsize(680, 440)
+        height = min(560, self.winfo_screenheight() - 100)
+        width = min(820, self.winfo_screenwidth() - 40)
+        self.geometry(f"{width}x{height}+{(self.winfo_screenwidth() - width) // 2}+{max((self.winfo_screenheight() - height) // 2 - 30, 0)}")
         self.configure(bg=COLORS["bg"])
         self.cancel_event = threading.Event()
         self.messages: queue.Queue[tuple] = queue.Queue()
@@ -80,7 +82,7 @@ class TranslatorApp(tk.Tk):
         style.configure("Card.TFrame", background=c["card"])
         style.configure("TLabel", background=c["bg"], foreground=c["text"])
         style.configure("Card.TLabel", background=c["card"], foreground=c["text"])
-        style.configure("Title.TLabel", font=(FONT, 22, "bold"))
+        style.configure("Title.TLabel", font=(FONT, 17, "bold"))
         style.configure("Subtitle.TLabel", foreground=c["muted"], font=(FONT, 10))
         style.configure("Section.TLabel", background=c["card"], foreground=c["muted"], font=(FONT, 9, "bold"))
         style.configure("Field.TLabel", background=c["card"], foreground=c["text"], font=(FONT, 10))
@@ -96,7 +98,7 @@ class TranslatorApp(tk.Tk):
             bordercolor=c["border"],
             lightcolor=c["border"],
             darkcolor=c["border"],
-            padding=8,
+            padding=6,
         )
         style.map("TEntry", bordercolor=[("focus", c["accent"])], lightcolor=[("focus", c["accent"])])
 
@@ -109,7 +111,7 @@ class TranslatorApp(tk.Tk):
             bordercolor=c["border"],
             lightcolor=c["border"],
             darkcolor=c["border"],
-            padding=6,
+            padding=4,
         )
         style.map(
             "TCombobox",
@@ -134,7 +136,7 @@ class TranslatorApp(tk.Tk):
             lightcolor=c["button"],
             darkcolor=c["button"],
             focuscolor=c["button"],
-            padding=(14, 8),
+            padding=(12, 5),
             font=(FONT, 10),
         )
         style.map(
@@ -153,7 +155,7 @@ class TranslatorApp(tk.Tk):
             lightcolor=c["accent"],
             darkcolor=c["accent"],
             focuscolor=c["accent"],
-            padding=(22, 10),
+            padding=(20, 7),
             font=(FONT, 10, "bold"),
         )
         style.map(
@@ -183,7 +185,7 @@ class TranslatorApp(tk.Tk):
             bordercolor=c["input"],
             lightcolor=c["accent"],
             darkcolor=c["accent"],
-            thickness=10,
+            thickness=8,
         )
 
         style.configure(
@@ -199,44 +201,44 @@ class TranslatorApp(tk.Tk):
 
     def _card(self, parent: tk.Widget, title: str) -> ttk.Frame:
         border = tk.Frame(parent, bg=COLORS["border"])
-        border.pack(fill="x", pady=(0, 14))
-        card = ttk.Frame(border, style="Card.TFrame", padding=18)
+        border.pack(fill="x", pady=(0, 10))
+        card = ttk.Frame(border, style="Card.TFrame", padding=(16, 12))
         card.pack(fill="both", expand=True, padx=1, pady=1)
-        ttk.Label(card, text=title.upper(), style="Section.TLabel").pack(anchor="w", pady=(0, 12))
+        ttk.Label(card, text=title.upper(), style="Section.TLabel").pack(anchor="w", pady=(0, 6))
         return card
 
     def _build(self) -> None:
-        outer = ttk.Frame(self, padding=(28, 24))
+        outer = ttk.Frame(self, padding=(20, 14))
         outer.pack(fill="both", expand=True)
 
         header = ttk.Frame(outer)
-        header.pack(fill="x", pady=(0, 20))
+        header.pack(fill="x", pady=(0, 12))
         title_row = ttk.Frame(header)
         title_row.pack(anchor="w")
         ttk.Label(title_row, text="Tradutor RPG Maker MV", style="Title.TLabel").pack(side="left")
-        ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(6, 0))
+        ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(4, 0))
         ttk.Label(
             header,
             text="Traduz diálogos e textos dos arquivos JSON, preservando os comandos do RPG Maker.",
             style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        folders = self._card(outer, "Pastas")
+        folders = self._card(outer, "Configuração")
         form = ttk.Frame(folders, style="Card.TFrame")
         form.pack(fill="x")
         form.columnconfigure(1, weight=1)
 
-        ttk.Label(form, text="Jogo", style="Field.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 14), pady=5)
-        ttk.Entry(form, textvariable=self.game_var).grid(row=0, column=1, sticky="ew", pady=5)
-        ttk.Button(form, text="Procurar…", command=self._choose_game).grid(row=0, column=2, padx=(10, 0), pady=5)
+        ttk.Label(form, text="Jogo", style="Field.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 14), pady=3)
+        ttk.Entry(form, textvariable=self.game_var).grid(row=0, column=1, sticky="ew", pady=3)
+        ttk.Button(form, text="Procurar…", command=self._choose_game).grid(row=0, column=2, padx=(10, 0), pady=3)
 
-        ttk.Label(form, text="Saída", style="Field.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=5)
-        ttk.Entry(form, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", pady=5)
-        ttk.Button(form, text="Procurar…", command=self._choose_output).grid(row=1, column=2, padx=(10, 0), pady=5)
+        ttk.Label(form, text="Saída", style="Field.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 14), pady=3)
+        ttk.Entry(form, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", pady=3)
+        ttk.Button(form, text="Procurar…", command=self._choose_output).grid(row=1, column=2, padx=(10, 0), pady=3)
 
-        languages_card = self._card(outer, "Idiomas")
-        languages = ttk.Frame(languages_card, style="Card.TFrame")
-        languages.pack(fill="x")
+        ttk.Label(form, text="Idioma", style="Field.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 14), pady=3)
+        languages = ttk.Frame(form, style="Card.TFrame")
+        languages.grid(row=2, column=1, columnspan=2, sticky="w", pady=3)
         ttk.Label(languages, text="De", style="Field.TLabel").pack(side="left")
         ttk.Combobox(
             languages,
@@ -256,7 +258,7 @@ class TranslatorApp(tk.Tk):
         ).pack(side="left", padx=10)
 
         buttons = ttk.Frame(outer)
-        buttons.pack(side="bottom", fill="x", pady=(14, 0))
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
         self.start_button = ttk.Button(buttons, text="Traduzir", style="Accent.TButton", command=self._start)
         self.start_button.pack(side="left")
         self.cancel_button = ttk.Button(
@@ -270,11 +272,11 @@ class TranslatorApp(tk.Tk):
 
         progress_border = tk.Frame(outer, bg=COLORS["border"])
         progress_border.pack(fill="both", expand=True)
-        progress_card = ttk.Frame(progress_border, style="Card.TFrame", padding=18)
+        progress_card = ttk.Frame(progress_border, style="Card.TFrame", padding=(16, 12))
         progress_card.pack(fill="both", expand=True, padx=1, pady=1)
 
         status_row = ttk.Frame(progress_card, style="Card.TFrame")
-        status_row.pack(fill="x", pady=(0, 10))
+        status_row.pack(fill="x", pady=(0, 6))
         ttk.Label(status_row, text="PROGRESSO", style="Section.TLabel").pack(side="left")
         ttk.Label(status_row, textvariable=self.percent_var, style="Percent.TLabel").pack(side="right")
 
@@ -285,7 +287,7 @@ class TranslatorApp(tk.Tk):
             style="Accent.Horizontal.TProgressbar",
         ).pack(fill="x")
         self.status_label = ttk.Label(progress_card, textvariable=self.status_var, style="Status.TLabel", wraplength=720)
-        self.status_label.pack(anchor="w", pady=(10, 12))
+        self.status_label.pack(anchor="w", pady=(6, 8))
 
         log_frame = tk.Frame(progress_card, bg=COLORS["border"])
         log_frame.pack(fill="both", expand=True)
@@ -293,7 +295,7 @@ class TranslatorApp(tk.Tk):
         log_inner.pack(fill="both", expand=True, padx=1, pady=1)
         self.log = tk.Text(
             log_inner,
-            height=7,
+            height=3,
             state="disabled",
             wrap="word",
             font=("Consolas", 9),
@@ -304,7 +306,7 @@ class TranslatorApp(tk.Tk):
             relief="flat",
             borderwidth=0,
             padx=10,
-            pady=8,
+            pady=6,
         )
         scrollbar = ttk.Scrollbar(log_inner, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=scrollbar.set)
