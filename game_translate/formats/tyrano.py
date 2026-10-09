@@ -4,7 +4,7 @@ import zipfile
 from html import escape, unescape
 from pathlib import Path
 
-from web_game import JAPANESE, render_source
+from game_translate.translation.source import JAPANESE
 
 TAG = re.compile(r'\[(?:[^\]"\']|"[^"]*"|\'[^\']*\')*\]')
 ATTRIBUTE = re.compile(r'\btext\s*=\s*(["\'])(.*?)\1', re.S)

@@ -4,9 +4,9 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from tyrano_game import collect_tyrano_strings
-from web_game import render_source
-from translator_core import resolve_data_folder, translate_game, apply_translation
+from game_translate.formats.tyrano import collect_tyrano_strings
+from game_translate.formats.web import render_source
+from game_translate.workflow import resolve_data_folder, translate_game, apply_translation
 
 
 class TyranoTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class TyranoTests(unittest.TestCase):
             original = exe.read_bytes()
             self.assertEqual(resolve_data_folder(game), game)
             model = type('Model', (), {'translate': lambda self, texts, *args: ['Olá' for _ in texts]})()
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._create_models', return_value=[model]):
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._create_models', return_value=[model]):
                 output, count, files = translate_game(game, root / 'output', cache_path=None)
             self.assertEqual((count, files), (2, 1))
             self.assertEqual(exe.read_bytes(), original)
@@ -64,6 +64,6 @@ class TyranoTests(unittest.TestCase):
             (game / 'data/scenario').mkdir(parents=True)
             (game / 'data/scenario/main.ks').write_text('Hello[p]', encoding='utf-8')
             model = type('Model', (), {'translate': lambda self, texts, *args: ['Olá' for _ in texts]})()
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._create_models', return_value=[model]):
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._create_models', return_value=[model]):
                 output, _, _ = translate_game(game, Path(temporary) / 'output', cache_path=None)
             self.assertEqual((output / 'data/scenario/main.ks').read_text(encoding='utf-8'), 'Olá[p]')

@@ -1,3 +1,4 @@
+from game_translate.common import TranslationCancelled
 import json
 import re
 import sqlite3
@@ -7,23 +8,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import translator_core
-from translator_core import (
-    ENGINES,
-    BatchModel,
-    EngineInfo,
-    MessageGroup,
-    NllbModel,
-    _load_cache,
-    _save_cache,
-    _wrap_lines,
-    collect_references,
-    ensure_engine_files,
-    load_settings,
-    save_settings,
-    translate_game,
-    translate_text,
-)
+from game_translate import workflow
+from game_translate import settings
+from game_translate.translation import catalog, models
+from game_translate.translation.catalog import ENGINES, EngineInfo
+from game_translate.settings import load_settings, save_settings
+from game_translate.translation.text import translate_text
+from game_translate.formats.rpg_maker import MessageGroup, _wrap_lines, collect_references
+from game_translate.translation.models import BatchModel, NllbModel, ensure_engine_files
+from game_translate.translation.cache import _load_cache, _save_cache
+from game_translate.workflow import translate_game
 
 
 class TranslateTextTests(unittest.TestCase):
@@ -153,7 +147,7 @@ class BatchModelTests(unittest.TestCase):
         self.assertEqual(model.calls, [["Hi there. ", "Bye now.", "Hi there."]])
 
     def test_stops_when_cancelled(self) -> None:
-        with self.assertRaises(translator_core.TranslationCancelled):
+        with self.assertRaises(TranslationCancelled):
             FakeModel().translate(["Hello."], lambda done, total: None, lambda: True)
 
 
@@ -186,7 +180,7 @@ class SettingsTests(unittest.TestCase):
     def test_saves_engine_and_falls_back_to_default(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "settings.json"
-            with mock.patch.object(translator_core, "SETTINGS_FILE", path):
+            with mock.patch.object(settings, "SETTINGS_FILE", path):
                 self.assertEqual(load_settings()["engine"], "argos")
                 save_settings({"engine": "nllb-1.3b"})
                 self.assertEqual(load_settings()["engine"], "nllb-1.3b")
@@ -202,7 +196,7 @@ class EngineDownloadTests(unittest.TestCase):
             engine = EngineInfo("teste", "Teste", "", "1 KB", (("model.bin", source.as_uri()),))
             messages: list[str] = []
 
-            with mock.patch.object(translator_core, "MODELS_DIR", Path(folder) / "models"):
+            with mock.patch.object(catalog, "MODELS_DIR", Path(folder) / "models"):
                 self.assertFalse(engine.is_installed())
                 ensure_engine_files(engine, lambda done, total, message: messages.append(message))
                 self.assertTrue(engine.is_installed())
@@ -218,8 +212,8 @@ class EngineDownloadTests(unittest.TestCase):
             source.write_bytes(b"x" * 1000)
             engine = EngineInfo("teste", "Teste", "", "1 KB", (("model.bin", source.as_uri()),))
 
-            with mock.patch.object(translator_core, "MODELS_DIR", Path(folder) / "models"):
-                with self.assertRaises(translator_core.TranslationCancelled):
+            with mock.patch.object(catalog, "MODELS_DIR", Path(folder) / "models"):
+                with self.assertRaises(TranslationCancelled):
                     ensure_engine_files(engine, is_cancelled=lambda: True)
                 self.assertEqual(list(engine.folder.iterdir()), [])
 
@@ -255,8 +249,8 @@ class TranslateGameTests(unittest.TestCase):
             return models[-1]
 
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(
-            translator_core, "ensure_translation_model"
-        ), mock.patch.object(translator_core, "_create_models", side_effect=lambda *_args: [create_model()]):
+            workflow, "ensure_translation_model"
+        ), mock.patch.object(workflow, "_create_models", side_effect=lambda *_args: [create_model()]):
             root = Path(folder)
             self._create_game(root)
             cache = root / "cache.sqlite3"
@@ -277,7 +271,7 @@ class TranslateGameTests(unittest.TestCase):
 
 def _installed_model(from_code: str, to_code: str):
     try:
-        return translator_core._get_package_translations(from_code, to_code)
+        return models._get_package_translations(from_code, to_code)
     except Exception:
         return None
 

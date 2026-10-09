@@ -5,8 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from web_game import collect_source_strings, render_source
-from translator_core import resolve_data_folder, translate_game, translate_text
+from game_translate.formats.web import collect_source_strings, render_source
+from game_translate.translation.text import translate_text
+from game_translate.workflow import resolve_data_folder, translate_game
 
 
 class WebGameTests(unittest.TestCase):
@@ -52,7 +53,7 @@ class WebGameTests(unittest.TestCase):
             (www / 'js' / 'scene.js').write_text('const scene = {t:"こんにちは"};', encoding='utf-8')
             self.assertEqual(resolve_data_folder(www.parent), www)
             model = type('Model', (), {'translate': lambda self, texts, *args: ['Olá' for t in texts]})()
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._create_models', return_value=[model]):
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._create_models', return_value=[model]):
                 output, count, files = translate_game(www.parent, root / 'translated', 'ja', 'pt', cache_path=None)
             self.assertEqual((count, files), (2, 2))
             self.assertIn('Olá', (output / 'js' / 'scene.js').read_text(encoding='utf-8'))

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import windows_locale as module
+import game_translate.platform.windows_locale as module
 
 
 ORIGINAL = {'locale': 'pt-BR', 'code_pages': {'ACP': '65001', 'OEMCP': '65001', 'MACCP': '10000'}}

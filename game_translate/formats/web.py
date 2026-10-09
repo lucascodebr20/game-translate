@@ -5,9 +5,9 @@ No JavaScript is executed. Comments and dynamic template literals stay intact.
 import json
 import re
 from html import escape, unescape
+from game_translate.translation.source import JAPANESE, render_source
 
 TOKENS = re.compile(r"//[^\n]*|/\*[\s\S]*?\*/|'(?:\\[\s\S]|[^'\\])*'|\"(?:\\[\s\S]|[^\"\\])*\"|`(?:\\[\s\S]|[^`\\])*`")
-JAPANESE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]")
 HTML_TOKENS = re.compile(r"<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?</\1\s*>|<[^>]+>|[^<]+", re.I)
 
 
@@ -71,8 +71,3 @@ def _decode_escape(match):
     return {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v", "0": "\0", "\n": ""}.get(value, value)
 
 
-def render_source(source, refs):
-    for ref in reversed(refs):
-        if ref.replacement is not None:
-            source = source[:ref.start] + ref.replacement + source[ref.end:]
-    return source

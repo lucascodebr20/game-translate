@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 
-STATE_FILE = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'TradutorRPGMaker' / 'windows_locale.json'
+STATE_FILE = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'TradutorRPGMaker' / 'game_translate.platform.windows_locale.json'
 NLS_KEY = r'SYSTEM\CurrentControlSet\Control\Nls'
 
 

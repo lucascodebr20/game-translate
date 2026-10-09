@@ -4,8 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pac_game import PacArchive, detect_pac_language, swap
-from translator_core import apply_translation, resolve_data_folder, translate_game, TranslationCancelled
+from game_translate.formats.pac import PacArchive, detect_pac_language, swap
+from game_translate.common import TranslationCancelled
+from game_translate.workflow import apply_translation, resolve_data_folder, translate_game
 
 
 def record(opcode, payload):
@@ -76,7 +77,7 @@ class PacTests(unittest.TestCase):
             self.assertEqual(resolve_data_folder(game), game)
             self.assertEqual(detect_pac_language(game), 'en')
             model = type('Model', (), {'translate': lambda self, texts, *args: ['Olá, bom dia!' for _ in texts]})()
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._create_models', return_value=[model]):
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._create_models', return_value=[model]):
                 output, count, files = translate_game(game, root / 'translated', cache_path=None)
             self.assertEqual((count, files), (2, 1))
             self.assertEqual([p.name for p in output.iterdir()], ['srp.pac'])
@@ -93,7 +94,7 @@ class PacTests(unittest.TestCase):
             game = root / 'game'
             game.mkdir()
             (game / 'srp.pac').write_bytes(fixture())
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._load_cache', return_value={
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._load_cache', return_value={
                 'Hello there. How are you?': 'Bom dia', 'A quiet morning.': 'Bom dia'
             }):
                 with self.assertRaises(TranslationCancelled):

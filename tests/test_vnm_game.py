@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from vnm_game import VnmDocument, prepare
-from translator_core import apply_translation, resolve_data_folder, translate_game
+from game_translate.formats.vnm import VnmDocument, prepare
+from game_translate.workflow import apply_translation, resolve_data_folder, translate_game
 
 
 class VnmTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class VnmTests(unittest.TestCase):
             for selected in (root / 'game', app, data):
                 self.assertEqual(resolve_data_folder(selected), app)
             model = type('Model', (), {'translate': lambda self, texts, *args: ['Olá' for _ in texts]})()
-            with patch('translator_core.ensure_translation_model'), patch('translator_core._create_models', return_value=[model]):
+            with patch('game_translate.workflow.ensure_translation_model'), patch('game_translate.workflow._create_models', return_value=[model]):
                 output, count, files = translate_game(root / 'game', root / 'translated', cache_path=None)
             self.assertEqual((count, files), (2, 1))
             self.assertEqual((data / 'scene.json.js').read_bytes(), original)

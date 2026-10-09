@@ -85,8 +85,8 @@ acentuado. Confira a tradução no jogo, incluindo o tamanho das caixas de
 texto, antes de continuar uma partida. A saída PAC é um patch de dados e
 precisa ser aplicada ao jogo para ser usada.
 
-O utilitário `inspect_pac.py` permite extrair os textos para inspeção:
-`python inspect_pac.py "C:\caminho\srp.pac" "output\textos.json"`.
+O utilitário de inspeção permite extrair os textos:
+`python -m game_translate.tools.inspect_pac "C:\caminho\srp.pac" "output\textos.json"`.
 
 1. Execute `Iniciar Tradutor.bat`.
 2. Selecione a pasta do jogo, a pasta `www` ou `www/data`.
@@ -96,6 +96,33 @@ O utilitário `inspect_pac.py` permite extrair os textos para inspeção:
 
 Na primeira tradução, o modelo offline de idioma será baixado. As próximas
 traduções usam o modelo já instalado.
+
+## Organização do projeto
+
+O código fica no pacote `game_translate`:
+
+| Módulo | Responsabilidade |
+|---|---|
+| `ui/` | Interface gráfica e configuração visual |
+| `formats/` | Leitura e escrita de RPG Maker, HTML, VNM, PAC e TyranoScript |
+| `translators/` | Adaptadores independentes: detecção, extração, saída e aplicação de cada formato |
+| `translation/` | Catálogo de modelos, inferência, cache e tratamento de texto |
+| `platform/` | Integração com a configuração regional do Windows |
+| `tools/` | Utilitários de inspeção e validação |
+| `workflow.py` | Coordenação dos adaptadores e dos modelos de idioma |
+| `storage.py` | Cópia de pastas e criação de backups |
+| `settings.py`, `paths.py`, `common.py` | Preferências, caminhos e tipos compartilhados |
+
+Os testes ficam em `tests/`. Execute `python -m unittest discover -v`.
+A aplicação inicia com `python -m game_translate` ou pelo arquivo
+`Iniciar Tradutor.bat`. O arquivo `app.py` também continua como inicializador.
+
+Cada adaptador em `translators/` usa apenas o leitor do seu formato em
+`formats/` e os serviços compartilhados. O contrato em `translators/base.py`
+define a detecção, o idioma, os documentos, a geração de saída e a aplicação.
+O registro em `translators/registry.py` seleciona o adaptador. Para adicionar
+um formato, implemente esse contrato e registre o adaptador; a interface e
+o fluxo de tradução não precisam de condições específicas para ele.
 
 O programa traduz diálogos, escolhas, textos rolantes, nomes e descrições do
 banco de dados. Scripts, notas de plugins e comandos internos são ignorados.
