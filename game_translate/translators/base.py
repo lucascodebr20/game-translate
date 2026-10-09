@@ -41,7 +41,7 @@ class FolderOutput:
 
     def write(self, folder, output, documents, progress=None, is_cancelled=None):
         check_cancelled(is_cancelled)
-        copy_game(folder, output)
+        copy_game(folder, output, progress, is_cancelled)
         changed = 0
         for document in documents:
             check_cancelled(is_cancelled)

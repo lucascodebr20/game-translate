@@ -31,7 +31,7 @@ class TyranoTranslator(FolderOutput):
         if executable is None:
             return super().write(folder, output, documents, progress, is_cancelled)
         check_cancelled(is_cancelled)
-        copy_game(folder, output)
+        copy_game(folder, output, progress, is_cancelled)
         replacements = {}
         for document in documents:
             check_cancelled(is_cancelled)

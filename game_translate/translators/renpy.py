@@ -42,7 +42,7 @@ class RenpyTranslator(FolderOutput):
     def write(self, folder, output, documents, progress=None, is_cancelled=None):
         check_cancelled(is_cancelled)
         # Native translation files do not exist in the source tree yet.
-        copy_game(folder, output)
+        copy_game(folder, output, progress, is_cancelled)
         changed = 0
         for document in documents:
             check_cancelled(is_cancelled)
