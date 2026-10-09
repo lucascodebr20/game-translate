@@ -20,6 +20,30 @@ arquivos ficam preservados. Engines com outros campos podem exigir adaptação.
 
 ## Uso
 
+### Ren’Py
+
+Selecione a pasta principal do jogo (com `game`, `renpy` e `lib`) ou sua
+pasta `game`. O tradutor usa o runtime Windows do próprio jogo para gerar
+arquivos nativos de tradução, inclusive quando os scripts estão em `*.rpa`.
+A extração acontece em uma pasta temporária e não altera o original.
+A primeira detecção pode levar alguns segundos.
+
+São traduzidos diálogos, escolhas e strings localizáveis reconhecidas pelo
+Ren’Py. Variáveis como `[mc]`, tags como `{b}` e comandos são preservados.
+Textos em imagens e strings de código sem marcação de tradução não são
+traduzidos. Jogos com somente scripts compilados podem ter menos strings
+de interface disponíveis, e runtimes diferentes podem exigir adaptações.
+
+A saída é uma cópia completa do jogo, com a tradução em
+`game/tl/game_translate` e um script que ativa esse idioma ao iniciar.
+Execute o jogo nessa cópia para conferir. **Aplicar ao jogo (com backup)**
+copia a saída para o original depois de criar um backup completo.
+Feche o jogo antes de aplicar. Para restaurar, recupere o jogo completo
+do backup, removendo a cópia modificada.
+
+Referência do formato e da geração nativa:
+[documentação de tradução do Ren’Py](https://www.renpy.org/doc/html/translation.html).
+
 ### TyranoScript / TyranoBuilder (NW.js)
 
 Selecione a pasta do jogo. O tradutor aceita cenários `data/scenario/*.ks`

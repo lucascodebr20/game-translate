@@ -7,8 +7,10 @@ from game_translate.translators.rpg_maker import RpgMakerTranslator
 from game_translate.translators.tyrano import TyranoTranslator
 from game_translate.translators.vnm import VnmTranslator
 from game_translate.translators.web import WebTranslator
+from game_translate.translators.renpy import RenpyTranslator
 
 TRANSLATORS: tuple[GameTranslator, ...] = (
+    RenpyTranslator(),
     TyranoTranslator(), PacTranslator(), VnmTranslator(), RpgMakerTranslator(), WebTranslator(),
 )
 
@@ -21,5 +23,5 @@ def resolve_game(selected: str | Path) -> tuple[GameTranslator, Path]:
             return translator, folder
     raise ValueError(
         "Jogo não encontrado. Selecione a pasta do jogo, 'www' ou 'www/data'. "
-        'Formatos aceitos: RPG Maker MV, HTML/JavaScript, TyranoScript, VNM e PAC de cenários (srp.pac).'
+        'Formatos aceitos: Ren’Py, RPG Maker MV, HTML/JavaScript, TyranoScript, VNM e PAC de cenários (srp.pac).'
     )

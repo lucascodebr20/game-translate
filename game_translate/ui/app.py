@@ -26,7 +26,7 @@ from game_translate.workflow import apply_translation, resolve_data_folder, tran
 class TranslatorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Tradutor de Jogos — RPG Maker, HTML, TyranoScript, VNM e PAC")
+        self.title("Tradutor de Jogos — Ren’Py, RPG Maker, HTML, TyranoScript, VNM e PAC")
         self.minsize(900, 500)
         height = min(560, self.winfo_screenheight() - 100)
         width = min(1060, self.winfo_screenwidth() - 40)
@@ -231,7 +231,7 @@ class TranslatorApp(tk.Tk):
         ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(4, 0))
         ttk.Label(
             header,
-            text="Traduz textos de jogos RPG Maker, HTML/JavaScript, TyranoScript, Visual Novel Maker e PAC.",
+            text="Traduz textos de jogos Ren’Py, RPG Maker, HTML/JavaScript, TyranoScript, Visual Novel Maker e PAC.",
             style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.settings_button = ttk.Button(header, text="⚙  Configurações", command=self._open_settings)
