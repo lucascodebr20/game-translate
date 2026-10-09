@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 from web_game import detect_web_language
 from pac_game import detect_pac_language
 from vnm_game import is_vnm_game, detect_vnm_language
+from tyrano_game import is_tyrano_game, detect_tyrano_language
 from windows_locale import read_configuration, load_snapshot, enable_japanese, restore_previous
 
 from translator_core import (
@@ -62,7 +63,7 @@ TARGET_LANGUAGES = {
 class TranslatorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Tradutor de Jogos — RPG Maker, HTML, VNM e PAC")
+        self.title("Tradutor de Jogos — RPG Maker, HTML, TyranoScript, VNM e PAC")
         self.minsize(900, 500)
         height = min(560, self.winfo_screenheight() - 100)
         width = min(1060, self.winfo_screenwidth() - 40)
@@ -267,7 +268,7 @@ class TranslatorApp(tk.Tk):
         ttk.Label(title_row, text="OFFLINE", style="Badge.TLabel").pack(side="left", padx=(12, 0), pady=(4, 0))
         ttk.Label(
             header,
-            text="Traduz textos de jogos RPG Maker, HTML/JavaScript, Visual Novel Maker e PAC (DOSNESAN).",
+            text="Traduz textos de jogos RPG Maker, HTML/JavaScript, TyranoScript, Visual Novel Maker e PAC.",
             style="Subtitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         self.settings_button = ttk.Button(header, text="⚙  Configurações", command=self._open_settings)
@@ -424,7 +425,10 @@ class TranslatorApp(tk.Tk):
         try:
             data = resolve_data_folder(selected)
             self._suggest_output(data)
-            if is_vnm_game(data):
+            if is_tyrano_game(data):
+                self.from_var.set("Japonês" if detect_tyrano_language(data) == "ja" else "Inglês")
+                self._append_log("TyranoScript: diálogos, escolhas e rótulos. A saída é uma cópia do jogo, incluindo o executável e os arquivos necessários.")
+            elif is_vnm_game(data):
                 self.from_var.set("Japonês" if detect_vnm_language(data) == "ja" else "Inglês")
                 self._append_log("Visual Novel Maker: diálogos, escolhas e textos localizáveis. Saída: cópia de resources/app.")
             elif (data / "index.html").is_file():

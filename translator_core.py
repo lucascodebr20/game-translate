@@ -19,6 +19,7 @@ import sentencepiece
 from web_game import collect_source_strings, render_source
 from pac_game import PacArchive, load_pac
 from vnm_game import VnmDocument, is_vnm_game
+from tyrano_game import is_tyrano_game, load_scenarios, collect_tyrano_strings, write_executable
 from argostranslate import settings as argos_settings
 
 
@@ -227,6 +228,8 @@ def _wrap_lines(text: str, count: int) -> list[str]:
 
 def resolve_data_folder(selected: str | Path) -> Path:
     path = Path(selected).expanduser().resolve()
+    if is_tyrano_game(path):
+        return path
     if (path / "srp.pac").is_file():
         return path
     for candidate in (path, path / "resources" / "app", path / "app", path.parent):
@@ -241,7 +244,7 @@ def resolve_data_folder(selected: str | Path) -> Path:
             return candidate
     raise ValueError(
         "Jogo não encontrado. Selecione a pasta do jogo, 'www' ou 'www/data'. "
-        "Formatos aceitos: RPG Maker MV, HTML/JavaScript e PAC de cenários (srp.pac)."
+        "Formatos aceitos: RPG Maker MV, HTML/JavaScript, TyranoScript, VNM e PAC de cenários (srp.pac)."
     )
 
 
@@ -743,11 +746,20 @@ def translate_game(
     documents: list[tuple[Path, object, list[TextReference | MessageGroup]]] = []
     unique_texts: dict[str, None] = {}
     vnm_game = is_vnm_game(data_folder)
-    web_game = (data_folder / "index.html").is_file() and not vnm_game
+    tyrano_game = is_tyrano_game(data_folder)
+    web_game = (data_folder / "index.html").is_file() and not vnm_game and not tyrano_game
     pac_game = (data_folder / "srp.pac").is_file()
+    tyrano_executable = None
+    if tyrano_game:
+        tyrano_executable, scenarios = load_scenarios(data_folder)
+        for relative, data in scenarios:
+            refs = collect_tyrano_strings(data, from_code)
+            documents.append((data_folder / relative, data, refs))
+            for ref in refs:
+                unique_texts.setdefault(ref.text, None)
     paths = (sorted((data_folder / "data").glob("*.json.js")) if vnm_game else
              sorted(data_folder.rglob("*.js")) + sorted(data_folder.rglob("*.html"))
-             if web_game else [data_folder / "srp.pac"] if pac_game else iter_json_files(data_folder))
+             if web_game else [] if tyrano_game else [data_folder / "srp.pac"] if pac_game else iter_json_files(data_folder))
     for path in paths:
         if is_cancelled and is_cancelled():
             raise TranslationCancelled()
@@ -817,11 +829,21 @@ def translate_game(
         raise TranslationCancelled()
     shutil.copytree(data_folder, output)
     changed_files = 0
+    replacements = {}
     for source, data, refs in documents:
         if not refs:
             continue
         for ref in refs:
             ref.set(final[ref.text])
+        if tyrano_game:
+            rendered = render_source(data, refs).encode('utf-8')
+            relative = source.relative_to(data_folder)
+            if tyrano_executable:
+                replacements[relative.as_posix()] = rendered
+            else:
+                (output / relative).write_bytes(rendered)
+            changed_files += 1
+            continue
         if vnm_game:
             rendered = data.render()
             VnmDocument(rendered, data.uid)
@@ -834,6 +856,10 @@ def translate_game(
             else:
                 json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
         changed_files += 1
+    if tyrano_executable:
+        if progress:
+            progress(0, 1, "Gravando e verificando o executável TyranoScript…")
+        write_executable(tyrano_executable, output / tyrano_executable.name, replacements)
     return output, len(final), changed_files
 
 
@@ -842,6 +868,17 @@ def apply_translation(original_data: str | Path, translated_data: str | Path) ->
     translated = Path(translated_data).expanduser().resolve()
     if not translated.is_dir():
         raise ValueError("Pasta traduzida não encontrada.")
+    if is_tyrano_game(original):
+        if translated == original or original in translated.parents or translated in original.parents:
+            raise ValueError("Selecione uma pasta traduzida separada do jogo original.")
+        executable, _ = load_scenarios(original)
+        if executable:
+            import zipfile
+            with zipfile.ZipFile(translated / executable.name) as archive:
+                if archive.testzip():
+                    raise ValueError("O executável traduzido contém arquivos corrompidos.")
+        elif not is_tyrano_game(translated):
+            raise ValueError("A saída não contém um jogo TyranoScript válido.")
     if is_vnm_game(original):
         if translated == original or original in translated.parents or translated in original.parents:
             raise ValueError("Selecione uma pasta traduzida separada do jogo original.")

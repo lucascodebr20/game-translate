@@ -20,6 +20,20 @@ arquivos ficam preservados. Engines com outros campos podem exigir adaptação.
 
 ## Uso
 
+### TyranoScript / TyranoBuilder (NW.js)
+
+Selecione a pasta do jogo. O tradutor aceita cenários `data/scenario/*.ks`
+em pastas abertas ou em um ZIP embutido no executável NW.js. O idioma é
+detectado automaticamente. São traduzidos diálogos, escolhas `glink` e
+rótulos de texto; comandos, scripts, nomes de personagens e variáveis
+permanecem preservados. Textos em imagens não são traduzidos.
+
+A saída contém uma cópia completa do jogo. Quando os dados estão embutidos,
+o executável é reconstruído preservando o runtime e verificando o ZIP.
+Execute o jogo na pasta de saída para conferir os textos. **Aplicar ao jogo
+(com backup)** copia a saída para a pasta original após criar um backup.
+Feche o jogo antes de aplicar.
+
 ### Visual Novel Maker
 
 Selecione a pasta do jogo. O aplicativo
